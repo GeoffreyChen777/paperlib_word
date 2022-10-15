@@ -196,13 +196,15 @@ Office.onReady((info) => {
         insertCitation(new Cite(Object.values(tempAddPaperEntities)).getIds())
       });
 
-      Office.context.document.settings.set("citationsData", [])
-      Office.context.document.settings.set("citationByIndex", [])
       csl = Office.context.document.settings.get("csl") || "apa"
-      citations.add(Office.context.document.settings.get("citationsData") || [])
+
+      const citationsData = Office.context.document.settings.get("citationsData") || []
+      console.log(citationsData)
+      citations.add(citationsData)
       const prepareEngine = require("@citation-js/plugin-csl/lib-mjs/engines").default;
-      const cslEngine = prepareEngine(Office.context.document.settings.get("citationsData") || [], csl, 'en-US', 'text')
+      const cslEngine = prepareEngine(citationsData, csl, 'en-US', 'text')
       const citationByIndex = Office.context.document.settings.get('citationByIndex') || []
+      console.log(citationByIndex)
       cslEngine.rebuildProcessorState(citationByIndex);
 
       $('#csl-style-select').val(csl)
@@ -379,6 +381,8 @@ function insertOrRefreshReferences() {
     const uniqueIds = new Set(tags);
     const ids = Array.from(uniqueIds);
 
+    console.log(ids)
+
     const referenceString = citations.format('bibliography', {
       format: 'text',
       template: csl,
@@ -405,7 +409,7 @@ function insertOrRefreshReferences() {
       for (const reference of references) {
         const refRange = existingReferences.items[0].insertText(`${reference[1]}\n`, Word.InsertLocation.end);
         if (bookmarkAvailable) {
-          refRange.insertBookmark(reference[0]);
+          refRange.insertBookmark(`Bookmark_${reference[0]}`);
         }
       }
     } else {
