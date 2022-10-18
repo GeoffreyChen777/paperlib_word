@@ -330,6 +330,7 @@ function insertCitation(ids: string[]) {
       }
     }
 
+    csl = csl || 'apa';
     const citationObjs = citations.format('citation', {
       format: 'text',
       template: csl,
@@ -399,6 +400,7 @@ function insertOrRefreshReferences() {
     const uniqueIds = new Set(tags);
     const ids = Array.from(uniqueIds);
 
+    csl = csl || 'apa';
     const referenceString = citations.format('bibliography', {
       format: 'text',
       template: csl,
