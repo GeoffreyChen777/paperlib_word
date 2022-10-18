@@ -179,9 +179,11 @@ Office.onReady((info) => {
       });
 
       $('#csl-style-select').on('change', function (event) {
-        csl = (event.target as HTMLSelectElement).value;
         if (['apa', 'vancouver', 'harvard1'].includes(csl)) {
+          csl = (event.target as HTMLSelectElement).value;
           Office.context.document.settings.set("csl", csl);
+          Office.context.document.settings.saveAsync();
+          $('#csl-style-select').val(csl);
           rebuildCitation();
         } else {
           webSocket.send(JSON.stringify({ type: 'load-csl', params: (event.target as HTMLSelectElement).value }))
@@ -457,6 +459,7 @@ function handleCSLNamesResult(results: Array<string>) {
   } else {
     csl = 'apa';
     Office.context.document.settings.set('csl', 'apa');
+    Office.context.document.settings.saveAsync();
   }
 
   console.log("Load", csl)
