@@ -15,9 +15,12 @@ let webSocket: WebSocket;
 var $ = jq
 
 const Cite = require('citation-js')
+const prepareEngine = require("@citation-js/plugin-csl/lib-mjs/engines").default;
+
 setCitePlugin()
-const citations = new Cite()
+let citations = new Cite()
 let csl = "apa"
+let cslEngine;
 
 let tempAddPaperEntities: Record<string, PaperEntity> = {}
 
@@ -132,13 +135,14 @@ Office.onReady((info) => {
 
     const version = Office.context.diagnostics.version;
     const platform = Office.context.diagnostics.platform;
-    if (platform === Office.PlatformType.Mac && version >= "15.32" || platform === Office.PlatformType.PC && version >= "16.12.7668.1000" || platform === Office.PlatformType.OfficeOnline) {
-
+    console.log(version, platform);
+    if (Office.context.requirements.isSetSupported('WordApi', "1.3")) {
       webSocket = new WebSocket("wss://localhost.paperlib.app:21993");
 
       const setSocketEvent = () => {
         webSocket.onopen = (event) => {
           $('#connect-icon').css('display', 'none')
+          webSocket.send(JSON.stringify({ type: 'csl-names' }))
         };
 
         webSocket.onclose = (event) => {
@@ -152,6 +156,10 @@ Office.onReady((info) => {
         webSocket.onmessage = (event) => {
           handler(event.data)
         };
+
+        if (webSocket.readyState === WebSocket.OPEN) {
+          webSocket.send(JSON.stringify({ type: 'csl-names' }))
+        }
       }
 
       setSocketEvent();
@@ -172,7 +180,12 @@ Office.onReady((info) => {
 
       $('#csl-style-select').on('change', function (event) {
         csl = (event.target as HTMLSelectElement).value;
-        Office.context.document.settings.set("csl", csl);
+        if (['apa', 'vancouver', 'harvard1'].includes(csl)) {
+          Office.context.document.settings.set("csl", csl);
+          rebuildCitation();
+        } else {
+          webSocket.send(JSON.stringify({ type: 'load-csl', params: (event.target as HTMLSelectElement).value }))
+        }
       });
 
       $('#btn-add-citation').on('click', function () {
@@ -196,21 +209,9 @@ Office.onReady((info) => {
         insertCitation(new Cite(Object.values(tempAddPaperEntities)).getIds())
       });
 
-      csl = Office.context.document.settings.get("csl") || "apa"
-
-      const citationsData = Office.context.document.settings.get("citationsData") || []
-      console.log(citationsData)
-      citations.add(citationsData)
-      const prepareEngine = require("@citation-js/plugin-csl/lib-mjs/engines").default;
-      const cslEngine = prepareEngine(citationsData, csl, 'en-US', 'text')
-      const citationByIndex = Office.context.document.settings.get('citationByIndex') || []
-      console.log(citationByIndex)
-      cslEngine.rebuildProcessorState(citationByIndex);
-
-      $('#csl-style-select').val(csl)
     }
 
-    if (platform === Office.PlatformType.Mac && version >= "16.64" || platform === Office.PlatformType.PC && version >= "22.08.15601.20148)" || platform === Office.PlatformType.OfficeOnline) {
+    if (Office.context.requirements.isSetSupported('WordApi', "1.4")) {
       bookmarkAvailable = true;
     }
   }
@@ -218,16 +219,24 @@ Office.onReady((info) => {
 });
 
 async function handler(data: string) {
+  console.log('handler')
   const message = JSON.parse(data) as { type: string, response: any }
   switch (message.type) {
     case 'search':
       handleSearchResult(message.response)
+      break;
+    case 'csl-names':
+      handleCSLNamesResult(message.response)
+      break;
+    case 'load-csl':
+      handleCSLResult(message.response)
       break;
   }
 }
 
 
 async function search(query: string) {
+  console.log('search')
   for (const paperEntity of Object.values(tempAddPaperEntities)) {
     $(`#check-${paperEntity.id}`).css('visibility', 'hidden')
     delete tempAddPaperEntities[`${paperEntity.id}`]
@@ -240,6 +249,7 @@ async function search(query: string) {
 
 let searchResults = {};
 async function handleSearchResult(results: { id: string, title: string, authors: string, publication: string, pubTime: string }[]) {
+  console.log('handle search result')
   $('#results-container').empty()
   for (const result of results) {
     searchResults[result.id] = result
@@ -287,9 +297,12 @@ async function handleSearchResult(results: { id: string, title: string, authors:
 }
 
 function insertCitation(ids: string[]) {
-
+  console.log('insert citation')
   Word.run(async (context) => {
     const range = context.document.getSelection();
+    const ccRange = range.insertContentControl();
+    ccRange.tag = ids.join(';');
+    ccRange.title = 'citation:new';
 
     const contentControls = context.document.contentControls;
     contentControls.load('title,tag');
@@ -298,20 +311,20 @@ function insertCitation(ids: string[]) {
     const citationsPre = []
     const citationsPost = []
 
+    let insertPost = false
     for (const contentControl of contentControls.items) {
-      const ccRange = contentControl.getRange('Whole');
-      const compareResult = range.compareLocationWith(ccRange)
-      await context.sync();
-
       if (!contentControl.title.startsWith('citation')) {
         continue
       }
       const citationID = contentControl.title.split(':')[1]
-
-      if (compareResult.value === 'Before') {
-        citationsPost.push([citationID, 0])
+      if (citationID === 'new') {
+        insertPost = true
       } else {
-        citationsPre.push([citationID, 0])
+        if (insertPost) {
+          citationsPost.push([citationID, 0])
+        } else {
+          citationsPre.push([citationID, 0])
+        }
       }
     }
 
@@ -329,32 +342,35 @@ function insertCitation(ids: string[]) {
       citationIDStringMap[citationObj[2]] = citationObj[1]
     }
 
-
     for (const contentControl of contentControls.items) {
-      const citationID = contentControl.title.split(':')[1]
-      const newCitationString = citationIDStringMap[citationID]
-      if (newCitationString) {
-        contentControl.insertText(newCitationString, 'Replace')
+      if (!contentControl.title.startsWith('citation')) {
+        continue
       }
-      citationIDStringMap[citationID] = null
+      const citationID = contentControl.title.split(':')[1]
+      if (citationID !== 'new') {
+        const paperIDs = contentControl.tag.split(';')
+        const newCitationString = citationIDStringMap[citationID]
+        if (newCitationString) {
+          const content = contentControl.insertText(newCitationString, 'Replace')
+          if (bookmarkAvailable) {
+            content.hyperlink = `#Bookmark_${paperIDs[0]}`;
+          }
+        }
+        delete citationIDStringMap[citationID]
+      }
     }
 
     const newCitationIDs = Object.keys(citationIDStringMap).filter((key) => {
       return citationIDStringMap[key] !== null
     })
 
-    const content = range.insertText(citationIDStringMap[newCitationIDs[0]], 'Replace');
+    ccRange.title = `citation:${newCitationIDs[0]}`;
+    const content = ccRange.insertText(citationIDStringMap[newCitationIDs[0]], 'Replace');
     if (bookmarkAvailable) {
       content.hyperlink = `#Bookmark_${ids[0]}`;
     }
-    const contentControl = content.insertContentControl()
-    contentControl.title = `citation:${newCitationIDs[0]}`;
-    contentControl.tag = ids.join(';');
 
     await context.sync();
-
-    const prepareEngine = require("@citation-js/plugin-csl/lib-mjs/engines").default;
-    const cslEngine = prepareEngine([], csl, 'en-US', 'text')
 
     Office.context.document.settings.set('citationByIndex', cslEngine.registry.citationreg.citationByIndex);
     Office.context.document.settings.saveAsync();
@@ -366,12 +382,12 @@ function insertCitation(ids: string[]) {
         $('#btn-add-citation').css('display', 'none')
       }
     }
-
   });
 
 }
 
 function insertOrRefreshReferences() {
+  console.log('insert or refresh references')
   Word.run(async (context) => {
     const contentControls = context.document.contentControls;
     contentControls.load('title,tag');
@@ -380,8 +396,6 @@ function insertOrRefreshReferences() {
     const tags = contentControls.items.filter(item => item.title.startsWith('citation') && item.tag).map((item) => item.tag?.split(';')).flat();
     const uniqueIds = new Set(tags);
     const ids = Array.from(uniqueIds);
-
-    console.log(ids)
 
     const referenceString = citations.format('bibliography', {
       format: 'text',
@@ -428,4 +442,58 @@ function insertOrRefreshReferences() {
       }
     }
   })
+}
+
+function handleCSLNamesResult(results: Array<string>) {
+  console.log('handle csl names result')
+  const currentCSL = Office.context.document.settings.get('csl') || 'apa';
+  for (const key of results) {
+    $('#csl-style-select').append(`<option value="${key}">${key}</option>`)
+  }
+
+  if (results.includes(currentCSL) || ['apa', 'vancouver', 'harvard1'].includes(currentCSL)) {
+    $('#csl-style-select').val(currentCSL);
+    csl = currentCSL;
+  } else {
+    csl = 'apa';
+    Office.context.document.settings.set('csl', 'apa');
+  }
+
+  console.log("Load", csl)
+
+  if (!['apa', 'vancouver', 'harvard1'].includes(csl)) {
+    webSocket.send(JSON.stringify({
+      type: 'load-csl',
+      params: Office.context.document.settings.get('csl')
+    }))
+  } else {
+    rebuildCitation();
+  }
+}
+
+function handleCSLResult(result: string) {
+  console.log('handle csl result')
+  if (result) {
+    csl = $('#csl-style-select').val() as string;
+    Office.context.document.settings.set('csl', $(`#csl-style-select`).val());
+    Office.context.document.settings.saveAsync();
+
+    let config = Cite.plugins.config.get("@csl");
+    config.templates.add(csl, result);
+    rebuildCitation();
+  } else {
+    $('#csl-style-select').val(Office.context.document.settings.get('csl'));
+  }
+}
+
+
+function rebuildCitation() {
+  console.log('rebuild citation')
+  const citationsData = Office.context.document.settings.get("citationsData") || [];
+  citations = null;
+  citations = new Cite(citationsData);
+  cslEngine = null;
+  cslEngine = prepareEngine(citationsData, csl, 'en-US', 'text');
+  const citationByIndex = Office.context.document.settings.get('citationByIndex') || [];
+  cslEngine.rebuildProcessorState(citationByIndex);
 }
