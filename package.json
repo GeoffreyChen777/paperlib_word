@@ -1,6 +1,6 @@
 {
   "name": "paperlib-word-plugin",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "license": "GPT-3.0",
   "config": {
     "app_to_debug": "word",

@@ -179,6 +179,7 @@ Office.onReady((info) => {
       });
 
       $('#csl-style-select').on('change', function (event) {
+        csl = (event.target as HTMLSelectElement).value
         if (['apa', 'vancouver', 'harvard1'].includes(csl)) {
           csl = (event.target as HTMLSelectElement).value;
           Office.context.document.settings.set("csl", csl);
