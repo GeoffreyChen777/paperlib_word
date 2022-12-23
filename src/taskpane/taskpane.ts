@@ -137,7 +137,7 @@ Office.onReady((info) => {
     const platform = Office.context.diagnostics.platform;
     console.log(version, platform);
     if (Office.context.requirements.isSetSupported('WordApi', "1.3")) {
-      webSocket = new WebSocket("wss://localhost.paperlib.app:21993");
+      webSocket = new WebSocket("wss://localhost2.paperlib.app:21993");
 
       const setSocketEvent = () => {
         webSocket.onopen = (event) => {
@@ -166,7 +166,7 @@ Office.onReady((info) => {
 
       $('#connect-icon').on('click', () => {
         console.log('reconnecting...')
-        webSocket = new WebSocket("wss://localhost.paperlib.app:21993");
+        webSocket = new WebSocket("wss://localhost2.paperlib.app:21993");
         setSocketEvent();
       })
 
